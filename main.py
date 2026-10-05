@@ -90,7 +90,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ----------------- 2. API KEY SETUP -----------------
-API_KEY = "AQ.Ab8RN6IpNuwu_-WmmHDD-IK3T6cDfA_ebYRNEaAdulNOTyukYA"
+API_KEY = "AQ.Ab8RN6IlzDoI-3Mi8c2e_dos-8kmFcED9xJ7TsxnAkJiWbWJ-w"
 
 try:
     if not API_KEY or API_KEY.startswith("PASTE"):
