@@ -14,15 +14,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom modern CSS for sticky split-view, cards, and audit alerts
+# Custom modern CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
     }
-    
-    /* Sticky photo container */
     .sticky-container {
         position: -webkit-sticky;
         position: sticky;
@@ -31,8 +29,6 @@ st.markdown("""
         overflow-y: auto;
         padding-right: 8px;
     }
-    
-    /* Modern KPI Cards */
     .metric-card {
         background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
         border: 1px solid rgba(255,255,255,0.12);
@@ -53,8 +49,6 @@ st.markdown("""
         text-transform: uppercase;
         letter-spacing: 0.8px;
     }
-    
-    /* Header Badge */
     .badge {
         display: inline-block;
         padding: 4px 12px;
@@ -66,8 +60,6 @@ st.markdown("""
         border: 1px solid rgba(33, 150, 243, 0.3);
         margin-bottom: 8px;
     }
-
-    /* Math Audit Alerts */
     .audit-box-green {
         background: rgba(46, 125, 50, 0.15);
         border-left: 4px solid #4caf50;
@@ -90,7 +82,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ----------------- 2. API KEY SETUP -----------------
-API_KEY = "AQ.Ab8RN6IlzDoI-3Mi8c2e_dos-8kmFcED9xJ7TsxnAkJiWbWJ-w"
+API_KEY = "AQ.Ab8RN6K0TuskukkM2plJ-NBgyBKdCU5OrAJjsAO9iW9QLP_Mzw"
 
 try:
     if not API_KEY or API_KEY.startswith("PASTE"):
@@ -108,6 +100,11 @@ with st.sidebar:
         index=0,
         help="gemini-3.6-flash is the fastest and most accurate for document extraction"
     )
+
+    if API_KEY and not API_KEY.startswith("PASTE"):
+        st.success("API Key is ready", icon="✅")
+    else:
+        st.error("API Key is missing", icon="❌")
     
     st.markdown("---")
     with st.expander("💡 Photography Tips", expanded=False):
@@ -124,7 +121,8 @@ st.caption("AI handwriting extraction, side-by-side verification, automated math
 
 TARGET_COLUMNS = ["Date", "ID", "Notes", "Amount 1", "USD Rate", "Rate Conv.", "Amount 2"]
 
-if "extracted_df" not in st.session_state or list(st.session_state["extracted_df"].columns) != TARGET_COLUMNS:
+# Safe initialization: NEVER automatically wipe data once created
+if "extracted_df" not in st.session_state:
     st.session_state["extracted_df"] = pd.DataFrame(columns=TARGET_COLUMNS)
 
 if "stored_images" not in st.session_state:
@@ -169,7 +167,7 @@ def extract_single_image(image_obj, client, model_name):
     parsed = json.loads(response.text)
     return parsed.get("records", [])
 
-# ----------------- 6. INPUT MODES (BATCH QUEUE / LIVE / MERGE) -----------------
+# ----------------- 6. INPUT MODES -----------------
 input_tab1, input_tab2, input_tab3 = st.tabs([
     "📁 Upload Pages (Batch Queue)", 
     "📸 Live Camera Snapshot", 
@@ -201,7 +199,6 @@ with input_tab3:
         if st.button("📥 Merge Master File Into Table"):
             try:
                 uploaded_df = pd.read_excel(existing_excel)
-                # Normalize column headers
                 col_map = {
                     "Amount 1 ($)": "Amount 1",
                     "Amount 2 ($)": "Amount 2",
@@ -219,7 +216,6 @@ with input_tab3:
                     ignore_index=True
                 ).drop_duplicates()
                 st.success(f"Merged {len(uploaded_df)} records from existing file!")
-                st.rerun()
             except Exception as e:
                 st.error(f"Failed to merge Excel: {e}")
 
@@ -238,19 +234,22 @@ if new_images_to_process:
 
     if start_process:
         if not API_KEY or API_KEY.startswith("PASTE"):
-            st.error("Please configure your Gemini API Key in line 50 of main.py.")
+            st.error("Please configure your Gemini API Key in line 70 of main.py.")
         else:
             client = genai.Client(api_key=API_KEY)
             progress_bar = st.progress(0)
             status_text = st.empty()
             
             total_added = 0
+
             for idx, (img_name, img_data) in enumerate(new_images_to_process):
                 status_text.text(f"Extracting Page {idx+1} of {len(new_images_to_process)}: {img_name}...")
                 try:
                     recs = extract_single_image(img_data, client, selected_model)
                     if recs:
                         df_page = pd.DataFrame(recs)
+                        
+                        # Strictly enforce target column names
                         for col in TARGET_COLUMNS:
                             if col not in df_page.columns:
                                 df_page[col] = None
@@ -265,13 +264,17 @@ if new_images_to_process:
                         )
                         st.session_state["stored_images"][img_name] = img_data
                         total_added += len(recs)
+                    else:
+                        st.warning(f"No records identified in {img_name}.")
                 except Exception as e:
                     st.error(f"Error on {img_name}: {e}")
                 
                 progress_bar.progress((idx + 1) / len(new_images_to_process))
 
-            status_text.success(f"Batch complete! Added {total_added} total rows.")
-            st.rerun()
+            if total_added > 0:
+                status_text.success(f"Extraction complete! Added {total_added} total rows.")
+            else:
+                status_text.warning("Extraction finished, but no table records were detected.")
 
 # ----------------- 7. DASHBOARD & SIDE-BY-SIDE VERIFICATION -----------------
 df = st.session_state["extracted_df"]
@@ -319,14 +322,12 @@ if not df.empty:
             rate_val = pd.to_numeric(day_subtotals.iloc[0]["USD Rate"], errors="coerce")
             rep_conv = pd.to_numeric(day_subtotals.iloc[0]["Rate Conv."], errors="coerce")
 
-            # Check Amount 1 sum
             diff1 = abs(calc_amt_1 - rep_amt_1) if pd.notnull(rep_amt_1) else 0
             if diff1 < 0.05:
                 audit_results.append((True, f"🟢 **{d}**: Math verified! Sum of Amount 1 (${calc_amt_1:,.2f}) matches ledger Subtotal (${rep_amt_1:,.2f}) perfectly."))
             else:
                 audit_results.append((False, f"🔴 **{d} Discrepancy**: Calculated sum of Amount 1 is **${calc_amt_1:,.2f}**, but Subtotal is written as **${rep_amt_1:,.2f}** (Difference: ${diff1:,.2f}). Please verify rows."))
 
-            # Check Rate Conversion calculation
             if pd.notnull(rate_val) and rate_val > 0 and pd.notnull(rep_conv) and pd.notnull(rep_amt_1):
                 calc_conv = rep_amt_1 / rate_val
                 if abs(calc_conv - rep_conv) < 0.1:
@@ -347,7 +348,6 @@ if not df.empty:
     
     col_split_img, col_split_data = st.columns([1, 1.4], gap="large")
 
-    # LEFT: Sticky Image Inspector with Zoom Controls
     with col_split_img:
         st.markdown('<div class="sticky-container">', unsafe_allow_html=True)
         st.subheader("🖼️ Sticky Image Inspector")
@@ -358,7 +358,6 @@ if not df.empty:
                 options=list(st.session_state["stored_images"].keys())
             )
             
-            # Zoom slider for checking messy handwriting
             zoom_pct = st.slider("🔍 Zoom Image", min_value=50, max_value=250, value=100, step=10)
             
             selected_image = st.session_state["stored_images"][img_choice]
@@ -372,7 +371,6 @@ if not df.empty:
         
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # RIGHT: Filter Bar + Table + Subtotal Highlighting + Reset
     with col_split_data:
         h_col, b_col = st.columns([3, 1])
         with h_col:
@@ -383,7 +381,6 @@ if not df.empty:
                 st.session_state["stored_images"] = {}
                 st.rerun()
 
-        # Dynamic Search & Filter Bar
         st.markdown("##### 🔎 Quick Search & Filter")
         f1, f2, f3 = st.columns([1, 1, 1])
         with f1:
@@ -403,7 +400,6 @@ if not df.empty:
 
         st.caption(f"Showing **{len(filtered_df)}** of **{len(df)}** rows. (Subtotal rows are marked in **bold**).")
 
-        # ----------------- 10. EDITABLE TABLE WITH DOLLAR FORMATTING -----------------
         edited_df = st.data_editor(
             filtered_df,
             use_container_width=True,
@@ -419,11 +415,9 @@ if not df.empty:
             }
         )
 
-        # ----------------- 11. EXPORT CENTER -----------------
         st.markdown("#### 📥 Export Clean Master File")
         exp1, exp2 = st.columns(2)
         
-        # Prepare clean display columns with $ in headers for Excel & CSV
         export_df = edited_df.rename(columns={
             "Amount 1": "Amount 1 ($)",
             "Amount 2": "Amount 2 ($)",
