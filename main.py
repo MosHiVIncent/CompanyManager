@@ -68,7 +68,7 @@ if uploaded_file:
                         """
 
                         response = client.models.generate_content(
-                            model="gemini-3.6-flash",
+                            model="gemini-3.7-flash",
                             contents=[prompt, img],
                             config=types.GenerateContentConfig(
                                 response_mime_type="application/json"
